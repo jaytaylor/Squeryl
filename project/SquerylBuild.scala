@@ -10,7 +10,7 @@ object SquerylBuild extends Build {
       settings = Project.defaultSettings ++ lsSettings ++ Seq(
     		  description := "A Scala ORM and DSL for talking with Databases using minimum verbosity and maximum type safety",
     		  organization := "org.squeryl",
-    		  version := "0.9.6",
+    		  version := "0.9.6.3",
     		  version <<= version { v => //only release *if* -Drelease=true is passed to JVM
     		  	val release = Option(System.getProperty("release")) == Some("true")
     		  	if(release)
@@ -48,11 +48,18 @@ object SquerylBuild extends Build {
 			  				</developer>
 			  			  </developers>),
     		  publishTo <<= version { v => //add credentials to ~/.sbt/sonatype.sbt
-    		  	val nexus = "https://oss.sonatype.org/"
+    		  	/*val nexus = "https://oss.sonatype.org/"
 				if (v.trim.endsWith("SNAPSHOT")) 
 				  Some("snapshots" at nexus + "content/repositories/snapshots") 
 				 else
-				   Some("releases"  at nexus + "service/local/staging/deploy/maven2")
+				   Some("releases"  at nexus + "service/local/staging/deploy/maven2")*/
+                Some(Resolver.sftp(
+                  "Scala.sh Repository",
+                  "scala.sh",
+                  "/var/www/scala.sh/public_html/repositories/" + (
+                    if (v.trim.endsWith("SNAPSHOT")) { "snapshots" } else { "releases" }
+                  )
+                ))
 			  },
 			  publishArtifact in Test := false,
 			  pomIncludeRepository := { _ => false },
