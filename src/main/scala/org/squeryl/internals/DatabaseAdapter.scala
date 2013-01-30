@@ -291,7 +291,7 @@ trait DatabaseAdapter {
     }
     catch {
       case e: SQLException =>
-          throw new RuntimeException(
+          throw SquerylSQLException(
             "Exception while executing statement : "+ e.getMessage+
            "\nerrorCode: " +
             e.getErrorCode + ", sqlState: " + e.getSQLState + "\n" +
@@ -309,7 +309,7 @@ trait DatabaseAdapter {
   protected def execFailSafeExecute(sw: StatementWriter, silenceException: SQLException => Boolean): Unit = {
     val s = Session.currentSession
     val c = s.connection
-    val stat = c.createStatement
+    val stat = createStatement(c)
     val sp =
       if(failureOfStatementRequiresRollback) Some(c.setSavepoint)
       else None
@@ -324,7 +324,7 @@ trait DatabaseAdapter {
         if(silenceException(e))
           sp.foreach(c.rollback(_))
         else
-          throw new RuntimeException(
+          throw SquerylSQLException(
             "Exception while executing statement,\n" +
             "SQLState:" + e.getSQLState + ", ErrorCode:" + e.getErrorCode + "\n :" +
             sw.statement, e)
@@ -346,20 +346,26 @@ trait DatabaseAdapter {
     _exec[A](s, sw, block, p)
   }
 
+  protected def prepareStatement(conn: Connection, statement: String): PreparedStatement =
+    conn.prepareStatement(statement)
+
+  protected def createStatement(conn: Connection): Statement =
+    conn.createStatement()
+
   def executeQuery(s: Session, sw: StatementWriter) = exec(s, sw) { params =>
-    val st = s.connection.prepareStatement(sw.statement)
+    val st = prepareStatement(s.connection, sw.statement)
     fillParamsInto(params, st)
     (st.executeQuery, st)
   }
 
   def executeUpdate(s: Session, sw: StatementWriter):(Int,PreparedStatement) = exec(s, sw) { params =>
-    val st = s.connection.prepareStatement(sw.statement)
+    val st = prepareStatement(s.connection, sw.statement)
     fillParamsInto(params, st)
     (st.executeUpdate, st)
   }
 
   def executeUpdateAndCloseStatement(s: Session, sw: StatementWriter): Int = exec(s, sw) { params =>
-    val st = s.connection.prepareStatement(sw.statement)
+    val st = prepareStatement(s.connection, sw.statement)
     fillParamsInto(params, st)
     try {
       st.executeUpdate
@@ -489,7 +495,7 @@ trait DatabaseAdapter {
     sw.nextLine
     sw.indent
     
-    t.posoMetaData.primaryKey.getOrElse(org.squeryl.internals.Utils.throwError("writeUpdate was called on an object that does not extend from KeyedEntity[]")).fold(
+    t.posoMetaData.primaryKey.getOrElse(throw new UnsupportedOperationException("writeUpdate was called on an object that does not extend from KeyedEntity[]")).fold(
       pkMd => sw.write(quoteName(pkMd.columnName), " = ", writeValue(o_, pkMd, sw)),
       pkGetter => {
         Utils.createQuery4WhereClause(t, (t0:T) => {

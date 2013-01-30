@@ -75,16 +75,25 @@ trait SelectElement extends ExpressionNode {
    *
    */
   def inhibitAliasOnSelectElementReference: Boolean = {
-    var e:ExpressionNode = origin
 
-    while(e.parent != None) {
-      e = e.parent.get
-    }
+    def shouldInhibit(e: ExpressionNode): Boolean =
+      e.parent map ({ p =>
+        if(p.isInstanceOf[QueryExpressionElements])
+          p.asInstanceOf[QueryExpressionElements].inhibitAliasOnSelectElementReference
+        else
+          shouldInhibit(p)
+      }) getOrElse true
 
-    if(!e.isInstanceOf[QueryExpressionElements])
-      true
-    else
-      e.asInstanceOf[QueryExpressionElements].inhibitAliasOnSelectElementReference
+    shouldInhibit(origin)
+  }
+
+  def realTableNamePrefix: Boolean = {
+
+    def parent(e: ExpressionNode): ExpressionNode =
+      (e.parent map (p => parent(p))) getOrElse e
+
+    val p = parent(origin)
+    p.isInstanceOf[UpdateStatement] || p.isInstanceOf[QueryExpressionElements]
   }
 
   def prepareColumnMapper(index: Int): Unit
@@ -118,7 +127,7 @@ class TupleSelectElement
  (val origin: QueryExpressionNode[_], val expression: ExpressionNode, indexInTuple: Int, isGroupTuple: Boolean)
     extends SelectElement {
 
-  def resultSetMapper: ResultSetMapper = org.squeryl.internals.Utils.throwError("refactor me")
+  def resultSetMapper: ResultSetMapper = throw new UnsupportedOperationException("refactor me")
 
   //TODO: normalize ?
   def alias =
@@ -152,7 +161,10 @@ class FieldSelectElement
 
   def alias =
     if(inhibitAliasOnSelectElementReference)
-      fieldMetaData.columnName
+      if(realTableNamePrefix)
+        origin.view.name + "." + fieldMetaData.columnName
+      else
+        fieldMetaData.columnName
     else
       origin.alias + "." + fieldMetaData.columnName
 
@@ -230,15 +242,18 @@ class SelectElementReference[A,T]
     selectElement.inhibited
 
   private def _useSite: QueryExpressionNode[_] = {
-    var e: ExpressionNode = this
-
-    do {
-      e = e.parent.get
-      if(e.isInstanceOf[QueryExpressionNode[_]])
-        return e.asInstanceOf[QueryExpressionNode[_]]
-    } while (e != None)
-
-    org.squeryl.internals.Utils.throwError("could not determine use site of "+ this)
+    
+    def findQueryExpressionNode(e: ExpressionNode): QueryExpressionNode[_] = e match {
+      case qe: QueryExpressionNode[_] => qe
+      case _ =>
+        e.parent match {
+          case Some(e_) => findQueryExpressionNode(e_)
+          case _ => 
+            org.squeryl.internals.Utils.throwError("could not determine use site of "+ this)
+        }
+    }
+    
+    findQueryExpressionNode(this)
   }
 
   lazy val delegateAtUseSite =
