@@ -28,9 +28,39 @@ import internals.{FieldMetaData, FieldReferenceLinker}
 import org.scalatest.Suite
 import collection.mutable.ArrayBuffer
 import org.squeryl.internals.StatementWriter
-import org.squeryl.PrimitiveTypeMode._
 import org.squeryl.dsl.ast.ExpressionNode
 
+
+object AppSpecificTypeMode extends org.squeryl.PrimitiveTypeMode {
+  implicit object personKED extends KeyedEntityDef[Student,Int] {
+    def getId(a:Student) = a.id
+    def isPersisted(a:Student) = a.id > 0
+    def idPropertyName = "id"
+  }
+  
+  implicit object schoolDbObjectKED extends KeyedEntityDef[SchoolDbObject,Int] {
+    def getId(a:SchoolDbObject) = a.id
+    def isPersisted(a:SchoolDbObject) = a.id > 0
+    def idPropertyName = "id"
+  }
+  
+  
+  implicit object courseKED extends KeyedEntityDef[Course,Int] {
+    def getId(a:Course) = a.id
+    def isPersisted(a:Course) = a.id > 0
+    def idPropertyName = "id"
+    override def optimisticCounterPropertyName = Some("occVersionNumber")
+  }
+  
+  implicit object course2KED extends KeyedEntityDef[Course2,Int] {
+    def getId(a:Course2) = a.id
+    def isPersisted(a:Course2) = a.id > 0
+    def idPropertyName = "id"
+    override def optimisticCounterPropertyName = Some("occVersionNumber")
+  }  
+}
+
+import AppSpecificTypeMode._
 
 object SingleTestRun extends org.scalatest.Tag("SingleTestRun")
 
@@ -46,9 +76,7 @@ class Student(var name: String, var lastName: String, var age: Option[Int], var 
   val id: Int = 0
 
   override def toString = "Student:" + id + ":" + name
-  
-  import org.squeryl.PrimitiveTypeMode._
-  
+
   def dummyKey = compositeKey(age, addressId)
 }
 
@@ -128,36 +156,10 @@ class StringKeyedEntity(val id: String, val tempo: Tempo.Tempo) extends KeyedEnt
 
 class SchoolDb extends Schema {
 
-  implicit object personKED extends KeyedEntityDef[Student,Int] {
-    def getId(a:Student) = a.id
-    def isPersisted(a:Student) = a.id > 0
-    def idPropertyName = "id"
-  }
-  
-  implicit object schoolDbObjectKED extends KeyedEntityDef[SchoolDbObject,Int] {
-    def getId(a:SchoolDbObject) = a.id
-    def isPersisted(a:SchoolDbObject) = a.id > 0
-    def idPropertyName = "id"
-  }
-  
-  
-  implicit object courseKED extends KeyedEntityDef[Course,Int] {
-    def getId(a:Course) = a.id
-    def isPersisted(a:Course) = a.id > 0
-    def idPropertyName = "id"
-    override def optimisticCounterPropertyName = Some("occVersionNumber")
-  }
-  
-  implicit object course2KED extends KeyedEntityDef[Course2,Int] {
-    def getId(a:Course2) = a.id
-    def isPersisted(a:Course2) = a.id > 0
-    def idPropertyName = "id"
-    override def optimisticCounterPropertyName = Some("occVersionNumber")
-  }
+
   
   val courses2 = table[Course2]
 
-  import org.squeryl.PrimitiveTypeMode._
 
 //  override val name = {
 //    if(Session.currentSession.databaseAdapter.isInstanceOf[OracleAdapter])
@@ -246,7 +248,12 @@ class SchoolDb extends Schema {
     super.drop
   }
 
+  def studentTransform(s: Student) = {
+     new Student(s.name, s.lastName, s.age, ((s.gender % 2) + 1), s.addressId, s.isMultilingual)
+  }
+
   val beforeInsertsOfPerson = new ArrayBuffer[Person]
+  val transformedStudents = new ArrayBuffer[Student]
   val beforeInsertsOfKeyedEntity = new ArrayBuffer[KeyedEntity[_]]
   val beforeInsertsOfProfessor = new ArrayBuffer[Professor]
   val afterInsertsOfProfessor = new ArrayBuffer[Professor]
@@ -257,6 +264,9 @@ class SchoolDb extends Schema {
   val professorsCreatedWithFactory = new ArrayBuffer[Int]
 
   override def callbacks = Seq(
+    // We'll change the gender of z1 z2 student
+    beforeInsert[Student]
+      map(s => {if (s.name == "z1" && s.lastName == "z2"){val s2 = studentTransform(s); transformedStudents.append(s2); s2} else s}),
 
     beforeInsert[Person]
       map(p => {beforeInsertsOfPerson.append(p); p}),
@@ -321,7 +331,6 @@ class TestInstance(schema : SchoolDb){
 
 abstract class FullOuterJoinTests extends SchoolDbTestBase{
 
-  import org.squeryl.PrimitiveTypeMode._
   import schema._
 
 
@@ -367,7 +376,7 @@ abstract class SchoolDbTestBase extends SchemaTester with QueryTester with RunTe
 
 }
 abstract class SchoolDbTestRun extends SchoolDbTestBase {
-  import org.squeryl.PrimitiveTypeMode._
+
   import schema._
 
   
@@ -642,10 +651,14 @@ abstract class SchoolDbTestRun extends SchoolDbTestBase {
     afterInsertsOfProfessor.clear
     beforeDeleteOfSchool.clear
     professorsCreatedWithFactory.clear
+    transformedStudents.clear
 
     val s1 = students.insert(new Student("z1", "z2", Some(4), 1, Some(4), Some(true)))
+    val sOpt = from(students)(s => where(s.name === "z1" and s.lastName === "z2") select(s)).headOption
 
+    assert(sOpt.isDefined && sOpt.map(_.gender == 2).getOrElse(false))
     assert(beforeInsertsOfPerson.exists(_ == s1))
+    assert(transformedStudents.exists(_ == s1))
     assert(! beforeInsertsOfKeyedEntity.exists(_ == s1))
     assert(!beforeInsertsOfProfessor.exists(_ == s1))
     assert(!afterInsertsOfProfessor.exists(_ == s1))
@@ -1744,8 +1757,6 @@ object Issue14Schema extends Schema{
 }
 
 abstract class Issue14 extends DbTestBase with QueryTester {
-
-  import org.squeryl.PrimitiveTypeMode._
 
 
 
